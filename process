@@ -1,0 +1,106 @@
+#!/usr/bin/env perl
+
+use warnings;
+use strict;
+use v5.22.0;
+
+no warnings 'experimental::smartmatch';
+
+use Image::ExifTool qw/:Public/;
+use File::Temp qw/tempdir/;
+
+die "Usage: $0 [files...]\n" unless @ARGV;
+processFile($_) for @ARGV;
+
+sub formatDate {
+    my ($date, $time) = split " ", shift;
+    $date =~ tr/:/-/;
+    $time =~ s/([+-].*)$/.0$1/;
+    return "${date}T${time}";
+}
+
+sub extractRecords {
+    my $info = shift;
+    my $records = {};
+    for (keys %$info) {
+        next unless /^AcquisitionRecordGroupItem(Name|Value)(.*)/;
+        $records->{$2}{$1} = $info->{$_};
+    }
+    return { map { $_->{Name} => $_->{Value} } values %$records };
+}
+
+sub extractTitle {
+    my ($title) = shift =~ m|^(?:.*/)?(.*)(?:\..+?)$|;
+    return $title;
+}
+
+sub formatLatLong {
+    my ($deg, $min, $sec) = split ":", shift;
+    return (shift ~~ [qw/S W/] ? "-": "") . ($deg + ($min / 60) + ($sec / 3600));
+}
+
+sub extractInfo {
+    my $file    = shift;
+    my $info    = ImageInfo($file);
+    my $records = extractRecords($info);
+    return {
+        title     => extractTitle($file),
+        date      => formatDate($info->{CreationDateValue}),
+        latitude  => formatLatLong($records->{Latitude},  $records->{LatitudeRef}),
+        longitude => formatLatLong($records->{Longitude}, $records->{LongitudeRef}),
+    }
+}
+
+sub randomString {
+    my @chars = ("A".."Z", "a".."z", "0".."9");
+    return join "", @chars[map { rand @chars } 1..10];
+}
+
+sub filename {
+    return shift . "/" . randomString() . ".mp4";
+}
+
+sub grade {
+    my ($file, $dir) = @_;
+    my $out     = filename($dir);
+    my @filters = (
+        "atadenoise",
+        "curves=r='0/0 0.5/0.54 1/1':m='0/0.05 0.2/0.25 0.5/0.6 0.7/0.8 1/1'",
+        "unsharp",
+    );
+    system(
+        "ffmpeg",
+        -threads => 0,
+        -i       => $file,
+        -vf      => join(",", @filters),
+        -pix_fmt => "yuv420p",
+        -crf     => 18,
+        "-c:v"   => "libx264",
+        $out
+    );
+    return $out;
+}
+
+sub upload {
+    my ($file, $info) = @_;
+    system(
+        "youtube-upload",
+        "--title"                  => $info->{title},
+        "--category"               => "People & Blogs",
+        "--tags"                   => "family, home-movies",
+        "--recording-date"         => $info->{date},
+        "--playlist"               => "Home movies",
+        "--default-language"       => "en",
+        "--default-audio-language" => "en",
+        "--privacy"                => "private",
+        ($info->{latitude} && $info->{longitude} ? ("--location" => "latitude=$info->{latitude},longitude=$info->{longitude}") : ()),
+        $file,
+    );
+}
+
+sub processFile {
+    my $file = shift;
+    my $info = extractInfo($file);
+    my $dir  = tempdir();
+    upload(grade($file, $dir), $info);
+}
