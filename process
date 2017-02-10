@@ -8,9 +8,21 @@ no warnings 'experimental::smartmatch';
 
 use Image::ExifTool qw/:Public/;
 use File::Temp qw/tempdir/;
+use File::Find::Rule;
 
 die "Usage: $0 [files...]\n" unless @ARGV;
-processFile($_) for @ARGV;
+processFile($_) for files(@ARGV);
+
+sub files {
+    return map {
+        -d $_ ? findFiles($_) :
+        -e $_ ? $_ : die "Could not find file $_";
+    } @_;
+}
+
+sub findFiles {
+    File::Find::Rule->file->name(qr/\.(mov|mp4|avi)$/i)->in(shift);
+}
 
 sub formatDate {
     my ($date, $time) = split " ", shift;
@@ -102,5 +114,6 @@ sub processFile {
     my $file = shift;
     my $info = extractInfo($file);
     my $dir  = tempdir();
+    say "Processing $file";
     upload(grade($file, $dir), $info);
 }
