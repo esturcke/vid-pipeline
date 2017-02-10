@@ -76,8 +76,8 @@ sub grade {
     my ($file, $dir) = @_;
     my $out     = filename($dir);
     my @filters = (
-        "atadenoise",
-        "curves=r='0/0 0.5/0.54 1/1':m='0/0.05 0.2/0.25 0.5/0.6 0.7/0.8 1/1'",
+        "eq=contrast=1.8:saturation=2.8:brightness=0.2",
+        "curves=r='0/0 0.52/0.58 1/1':m='0/0.05 0.2/0.27 0.5/0.6 0.7/0.8 1/1'",
         "unsharp",
     );
     system(
