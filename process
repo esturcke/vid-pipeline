@@ -9,9 +9,23 @@ no warnings 'experimental::smartmatch';
 use Image::ExifTool qw/:Public/;
 use File::Temp qw/tempdir/;
 use File::Find::Rule;
+use File::Path qw/make_path/;
+use File::Copy qw/cp/;
+use Furl;
+use JSON;
+use Carp;
+use List::Util qw/first/;
+use Digest::SHA qw/sha256_hex/;
+use Data::Dumper;
 
-die "Usage: $0 [files...]\n" unless @ARGV;
-processFile($_) for files(@ARGV);
+my $furl = Furl->new(
+  headers => [ 'Accept-Encoding' => 'gzip' ],
+);
+
+die "Usage: $0 [files...] [target]\n" unless @ARGV > 1;
+my $target = pop @ARGV;
+die "$target is not a directory" unless -d $target;
+processFile($_, $target) for grep { $_ !~ m|/\.[^/]+$| } files(@ARGV);
 
 sub files {
   return map {
@@ -46,20 +60,102 @@ sub extractTitle {
   return $title;
 }
 
-sub formatLatLong {
+sub formatSonyLatLong {
+  return undef unless defined $_[0];
   my ($deg, $min, $sec) = split ":", shift;
   return (shift ~~ [qw/S W/] ? "-": "") . ($deg + ($min / 60) + ($sec / 3600));
 }
 
-sub extractInfo {
-  my $file    = shift;
-  my $info    = ImageInfo($file);
+sub formatIPhoneLatLong {
+  return undef unless defined $_[0];
+  my ($deg, $min, $sec, $direction) = shift =~ /^(\d+) deg (\d+)' ([\d.]+)" ([NWSE])$/;
+  return ($direction ~~ [qw/S W/] ? "-": "") . ($deg + ($min / 60) + ($sec / 3600));
+}
+
+sub place {
+  my ($lat, $long) = @{$_[0]}{qw/latitude longitude/};
+  return undef unless defined $lat && defined $long;
+
+  my $res = decode_json $furl->get("https://maps.googleapis.com/maps/api/geocode/json?latlng=$lat,$long&sensor=true")->content;
+  return undef if $res->{status} eq "ZERO_RESULTS";
+  confess "Result no OK: " . Dumper $res unless $res->{status} eq "OK"; 
+
+  my $match = $res->{results}[0]{address_components};
+  confess "Failed to get match: " . Dumper $res unless $match;
+
+  my $neighborhood = first { $_->{types}[0] eq "neighborhood" } @$match;
+  my $locality     = first { $_->{types}[0] eq "locality"     } @$match;
+  confess "Failed to get neightborhood/locality: " . Dumper $match unless $neighborhood && $locality;
+  return "$neighborhood->{long_name} ($locality->{long_name})";
+}
+
+sub sonyInfo {
+  my $info    = shift;
   my $records = extractRecords($info);
   return {
-    title     => extractTitle($file),
+    camera    => "Sony α6500",
     date      => formatDate($info->{CreationDateValue}),
-    latitude  => formatLatLong($records->{Latitude},  $records->{LatitudeRef}),
-    longitude => formatLatLong($records->{Longitude}, $records->{LongitudeRef}),
+    latitude  => formatSonyLatLong($records->{Latitude},  $records->{LatitudeRef}),
+    longitude => formatSonyLatLong($records->{Longitude}, $records->{LongitudeRef}),
+    filters   => ($records->{SpeedRef} ? [
+      "eq=contrast=1.8:saturation=2.8:brightness=0.2",
+      "curves=r='0/0 0.52/0.58 1/1':m='0/0.05 0.2/0.27 0.5/0.6 0.7/0.8 1/1'",
+      "unsharp",
+    ] : undef),
+  }
+}
+
+sub canonInfo {
+  my $info = shift;
+  return {
+    camera  => "Canon 60D",
+    lens    => $info->{LensID},
+    date    => formatDate($info->{MediaCreateDate} . "-05:00"),
+    filters => [
+      "eq=contrast=1.8:saturation=2.8:brightness=0.2",
+      "curves=r='0/0 0.52/0.58 1/1':m='0/0.05 0.2/0.27 0.5/0.6 0.7/0.8 1/1'",
+      "unsharp",
+    ]
+  }
+}
+
+sub iPhoneInfo {
+  my $info = shift;
+  return {
+    camera    => $info->{Model},
+    date      => formatDate($info->{CreationDate}),
+    latitude  => formatIPhoneLatLong($info->{GPSLatitude}),
+    longitude => formatIPhoneLatLong($info->{GPSLongitude}),
+  }
+}
+
+sub description {
+  my ($sha, $place, $info) = @_;
+  my $description = join " ", map { "$_." } grep { defined } $place, @{$info}{qw/place camera lens/};
+  return $description . "\n\n$sha";
+}
+
+sub cameraInfo {
+  my $info = shift;
+  return sonyInfo($info)   if $info->{DeviceModelName} // "" eq "ILCE-6500";
+  return canonInfo($info)  if $info->{Model} eq "Canon EOS 60D";
+  return iPhoneInfo($info) if $info->{Model} =~ /iPhone/;
+  confess "Failed to figure out the model: " . Dumper $info;
+}
+
+sub extractInfo {
+  my $file       = shift;
+  my $sha        = sha256_hex($file);
+  my $info       = ImageInfo($file);
+  my $cameraInfo = cameraInfo($info);
+  my $place      = place($cameraInfo);
+
+  return {
+    %$cameraInfo,
+    title       => extractTitle($file),
+    sha         => $sha,
+    place       => $place,
+    description => description($sha, $place, $cameraInfo),
   }
 }
 
@@ -73,18 +169,14 @@ sub filename {
 }
 
 sub grade {
-  my ($file, $dir) = @_;
-  my $out     = filename($dir);
-  my @filters = (
-    "eq=contrast=1.8:saturation=2.8:brightness=0.2",
-    "curves=r='0/0 0.52/0.58 1/1':m='0/0.05 0.2/0.27 0.5/0.6 0.7/0.8 1/1'",
-    "unsharp",
-  );
+  my ($file, $dir, $info) = @_;
+  return $file unless $info->{filters};
+  my $out = filename($dir);
   system(
     "ffmpeg",
     -threads => 0,
     -i       => $file,
-    -vf      => join(",", @filters),
+    -vf      => join(",", @{$info->{filters}}),
     -pix_fmt => "yuv420p",
     -crf     => 18,
     "-c:v"   => "libx264",
@@ -98,6 +190,7 @@ sub upload {
   system(
     "youtube-upload",
     "--title"                  => $info->{title},
+    "--description"            => $info->{description},
     "--category"               => "People & Blogs",
     "--tags"                   => "family, home-movies",
     "--recording-date"         => $info->{date},
@@ -110,10 +203,52 @@ sub upload {
   );
 }
 
+sub findDirectory {
+  my ($target, $year, $day) = @_;
+  return unless -d "$target/$year";
+  opendir my $dir, "$target/$year" or confess "Failed to open directory: $!";
+  my ($directory) = first { m|^$target/$year/$day| } readdir $dir;
+  closedir $dir;
+  return $directory;
+}
+
+sub copy {
+  my ($file, $target, $info) = @_;
+  my ($year, $day) = $info->{date} =~ /^(\d+)-(\d\d-\d\d)/;
+  my ($extension) = map { lc } $file =~ /.([\w]+)$/;
+
+  # find directory
+  my $directory = findDirectory($target, $year, $day);
+  if (!$directory) {
+    $directory = $info->{place} ? "$target/$year/$day $info->{place}" : "$target/$year/$day";
+    make_path $directory;
+  }
+  elsif ($directory !~ /$info->{place}/) {
+    my $new = length($directory) == 10 ?  "$directory $info->{place}" : "$directory, $info->{place}";
+    rename $directory, $new;
+    $directory = $new;
+  }
+
+  my $destination = "$directory/$info->{sha}.$extension";
+  if (-e $destination) {
+    say "Target $destination exists";
+    return;
+  }
+
+  cp $file, $destination;
+}
+
 sub processFile {
-  my $file = shift;
-  my $info = extractInfo($file);
-  my $dir  = tempdir();
+  my $file   = shift;
+  my $target = shift;
+  my $info   = extractInfo($file);
+  my $dir    = tempdir();
   say "Processing $file";
-  upload(grade($file, $dir), $info);
+  say Dumper $info;
+
+  # copy file to target
+  return unless copy($file, $target, $info);
+
+  # upload
+  upload(grade($file, $dir, $info), $info);
 }
