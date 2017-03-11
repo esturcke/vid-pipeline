@@ -16,7 +16,12 @@ use JSON;
 use Carp;
 use List::Util qw/first/;
 use Digest::SHA qw/sha256_hex/;
+use Time::Piece;
 use Data::Dumper;
+
+use constant MONTH => [
+  qw/_ Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec/
+];
 
 my $furl = Furl->new(
   headers => [ 'Accept-Encoding' => 'gzip' ],
@@ -139,9 +144,14 @@ sub generalInfo {
   }
 }
 
+sub prettyDate {
+  my ($date) = shift =~ /^(\d+-\d+-\d+T\d+:\d+):/;
+  return Time::Piece->strptime($date, "%Y-%m-%dT%H:%M")->strftime("%A, %B %e, %Y, %I:%M %p");
+}
+
 sub description {
   my ($sha, $place, $info) = @_;
-  my $description = join " ", map { "$_." } grep { defined } $place, @{$info}{qw/place camera lens/};
+  my $description = join " ", map { "$_." } grep { defined } prettyDate($info->{date}), $place, @{$info}{qw/place camera lens/};
   return $description . "\n\n$sha";
 }
 
@@ -196,8 +206,17 @@ sub grade {
   return $out;
 }
 
+use constant DELAY => 30;
+my $last;
 sub upload {
   my ($file, $info) = @_;
+  my $wait = $last ? DELAY - (time - $last) : 0;
+  if ($wait > 0) {
+    say "Waiting for $wait seconds";
+    sleep $wait;
+  }
+  $last = time;
+
   system(
     "youtube-upload",
     "--title"                  => $info->{title},
