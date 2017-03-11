@@ -208,7 +208,7 @@ sub grade {
   return $out;
 }
 
-use constant DELAY => 30;
+use constant DELAY => 60;
 my $last;
 sub upload {
   my ($file, $info) = @_;
