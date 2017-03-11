@@ -211,7 +211,7 @@ sub upload {
     "--privacy"                => "private",
     ($info->{latitude} && $info->{longitude} ? ("--location" => "latitude=$info->{latitude},longitude=$info->{longitude}") : ()),
     $file,
-  );
+  ) == 0 or die "Upload failed: $?";
 }
 
 sub findDirectory {
