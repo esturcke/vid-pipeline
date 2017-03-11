@@ -90,8 +90,8 @@ sub place {
 
   my $neighborhood = first { $_->{types}[0] eq "neighborhood" } @$match;
   my $locality     = first { $_->{types}[0] eq "locality"     } @$match;
-  confess "Failed to get neightborhood/locality: " . Dumper $match unless $neighborhood && $locality;
-  return "$neighborhood->{long_name} ($locality->{long_name})";
+  confess "Failed to gey locality: " . Dumper $match unless $locality;
+  return $neighborhood ? "$neighborhood->{long_name} ($locality->{long_name})" : $locality->{long_name};
 }
 
 sub sonyInfo {
