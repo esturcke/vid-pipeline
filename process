@@ -129,6 +129,16 @@ sub iPhoneInfo {
   }
 }
 
+sub generalInfo {
+  my $info = shift;
+  return {
+    camera    => $info->{Model},
+    date      => formatDate($info->{CreationDate}),
+    latitude  => formatIPhoneLatLong($info->{GPSLatitude}),
+    longitude => formatIPhoneLatLong($info->{GPSLongitude}),
+  }
+}
+
 sub description {
   my ($sha, $place, $info) = @_;
   my $description = join " ", map { "$_." } grep { defined } $place, @{$info}{qw/place camera lens/};
@@ -137,16 +147,17 @@ sub description {
 
 sub cameraInfo {
   my $info = shift;
-  return sonyInfo($info)   if $info->{DeviceModelName} // "" eq "ILCE-6500";
-  return canonInfo($info)  if $info->{Model} eq "Canon EOS 60D";
-  return iPhoneInfo($info) if $info->{Model} =~ /iPhone/;
+  return sonyInfo($info)    if $info->{DeviceModelName} // "" eq "ILCE-6500";
+  return canonInfo($info)   if $info->{Model} eq "Canon EOS 60D";
+  return iPhoneInfo($info)  if $info->{Model} =~ /iPhone/;
+  return generalInfo($info) if $info->{Model};
   confess "Failed to figure out the model: " . Dumper $info;
 }
 
 sub extractInfo {
   my $file       = shift;
   my $sha        = sha256_hex($file);
-  my $info       = ImageInfo($file);
+  my $info       = { %{ImageInfo($file)}, PreviewImage => undef };
   my $cameraInfo = cameraInfo($info);
   my $place      = place($cameraInfo);
 
