@@ -44,7 +44,10 @@ sub findFiles {
 }
 
 sub formatDate {
-  my ($date, $time) = split " ", shift;
+  my $datetime = shift;
+  $datetime .= ":00" unless $datetime =~ /\d+:\d+:\d+/;
+  $datetime .= "-05:00" unless $datetime =~ /-/;
+  my ($date, $time) = split " ", $datetime;
   $date =~ tr/:/-/;
   $time =~ s/([+-].*)$/.0$1/;
   return "${date}T${time}";
@@ -115,7 +118,7 @@ sub canonInfo {
   return {
     camera  => "Canon 60D",
     lens    => $info->{LensID},
-    date    => formatDate($info->{MediaCreateDate} . "-05:00"),
+    date    => formatDate($info->{MediaCreateDate}),
     filters => [
       "eq=contrast=1.8:saturation=2.8:brightness=0.2",
       "curves=r='0/0 0.52/0.58 1/1':m='0/0.05 0.2/0.27 0.5/0.6 0.7/0.8 1/1'",
@@ -138,7 +141,7 @@ sub generalInfo {
   my $info = shift;
   return {
     camera    => $info->{Model},
-    date      => formatDate($info->{CreationDate}),
+    date      => formatDate($info->{CreationDate} // $info->{CreateDate} // confess "Could not find date: " . Dumper $info),
     latitude  => formatIPhoneLatLong($info->{GPSLatitude}),
     longitude => formatIPhoneLatLong($info->{GPSLongitude}),
   }
@@ -157,11 +160,10 @@ sub description {
 
 sub cameraInfo {
   my $info = shift;
-  return sonyInfo($info)    if $info->{DeviceModelName} // "" eq "ILCE-6500";
-  return canonInfo($info)   if $info->{Model} eq "Canon EOS 60D";
-  return iPhoneInfo($info)  if $info->{Model} =~ /iPhone/;
-  return generalInfo($info) if $info->{Model};
-  confess "Failed to figure out the model: " . Dumper $info;
+  return sonyInfo($info)   if ($info->{DeviceModelName} // "") eq "ILCE-6500";
+  return canonInfo($info)  if ($info->{Model} // "") eq "Canon EOS 60D";
+  return iPhoneInfo($info) if ($info->{Model} // "") =~ /iPhone/;
+  return generalInfo($info);
 }
 
 sub extractInfo {
