@@ -211,7 +211,7 @@ sub grade {
 use constant DELAY => 60;
 my $last;
 sub upload {
-  my ($file, $info) = @_;
+  my ($file, $info, $destination) = @_;
   my $wait = $last ? DELAY - (time - $last) : 0;
   if ($wait > 0) {
     say "Waiting for $wait seconds";
@@ -219,7 +219,7 @@ sub upload {
   }
   $last = time;
 
-  system(
+  my $status = system(
     "youtube-upload",
     "--title"                  => $info->{title},
     "--description"            => $info->{description},
@@ -232,7 +232,12 @@ sub upload {
     "--privacy"                => "private",
     ($info->{latitude} && $info->{longitude} ? ("--location" => "latitude=$info->{latitude},longitude=$info->{longitude}") : ()),
     $file,
-  ) == 0 or die "Upload failed: $?";
+  );
+  
+  unless ($status == 0) {
+    say "Removing $destination";
+    die "Upload failed: $?";
+  }
 }
 
 sub findDirectory {
@@ -267,7 +272,8 @@ sub copy {
     return;
   }
 
-  cp $file, $destination;
+  cp($file, $destination) || confess "Failed to copy $file → $destination: $!";
+  return $destination;
 }
 
 sub processFile {
@@ -279,8 +285,8 @@ sub processFile {
   say Dumper $info;
 
   # copy file to target
-  return unless copy($file, $target, $info);
+  my $destination = copy($file, $target, $info) || return;
 
   # upload
-  upload(grade($file, $dir, $info), $info);
+  upload(grade($file, $dir, $info), $info, $destination);
 }
