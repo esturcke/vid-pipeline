@@ -84,9 +84,10 @@ sub place {
   my ($lat, $long) = @{$_[0]}{qw/latitude longitude/};
   return undef unless defined $lat && defined $long;
 
+  say "Looking up place";
   my $res = decode_json $furl->get("https://maps.googleapis.com/maps/api/geocode/json?latlng=$lat,$long&sensor=true")->content;
   return undef if $res->{status} eq "ZERO_RESULTS";
-  confess "Result no OK: " . Dumper $res unless $res->{status} eq "OK"; 
+  confess "Result not OK: " . Dumper $res unless $res->{status} eq "OK"; 
 
   my $match = $res->{results}[0]{address_components};
   confess "Failed to get match: " . Dumper $res unless $match;
@@ -166,12 +167,30 @@ sub cameraInfo {
   return generalInfo($info);
 }
 
+sub targetExists {
+  my ($target, $file, $date, $sha) = @_;
+  my ($year, $day) = $date =~ /^(\d+)-(\d\d-\d\d)/;
+  my ($extension) = map { lc } $file =~ /.([\w]+)$/;
+
+  # find directory
+  my $directory = findDirectory($target, $year, $day);
+  return if !$directory;
+  my $targetFile = "$directory/$sha.$extension";
+  return unless -e $targetFile;
+
+  say "$targetFile already exists";
+  return 1;
+}
+
 sub extractInfo {
   my $file       = shift;
   my $sha        = sha256_hex($file);
   my $info       = { %{ImageInfo($file)}, PreviewImage => undef };
   my $cameraInfo = cameraInfo($info);
   my $place      = place($cameraInfo);
+
+  # check if file exists before we hit google API
+  return if targetExists($target, $file, $cameraInfo->{date}, $sha);
 
   return {
     %$cameraInfo,
@@ -244,9 +263,9 @@ sub findDirectory {
   my ($target, $year, $day) = @_;
   return unless -d "$target/$year";
   opendir my $dir, "$target/$year" or confess "Failed to open directory: $!";
-  my ($directory) = first { m|^$target/$year/$day| } readdir $dir;
+  my ($directory) = first { m|^$day| } readdir $dir;
   closedir $dir;
-  return $directory;
+  return "$target/$year/$directory";
 }
 
 sub copy {
@@ -261,7 +280,7 @@ sub copy {
     make_path $directory;
   }
   elsif ($directory !~ /$info->{place}/) {
-    my $new = length($directory) == 10 ?  "$directory $info->{place}" : "$directory, $info->{place}";
+    my $new = $directory =~ m|/\d{2}-\d{2}$| ?  "$directory $info->{place}" : "$directory, $info->{place}";
     rename $directory, $new;
     $directory = $new;
   }
@@ -279,7 +298,7 @@ sub copy {
 sub processFile {
   my $file   = shift;
   my $target = shift;
-  my $info   = extractInfo($file);
+  my $info   = extractInfo($file, $target) || return;
   my $dir    = tempdir();
   say "Processing $file";
   say Dumper $info;
