@@ -67,33 +67,45 @@ sub extractTitle {
   return $title;
 }
 
+# Rund to ~100m (at the equator)
+sub roundLatLong {
+  my $value = shift;
+  return int($value * 1000 + 0.5) / 1000;
+}
+
 sub formatSonyLatLong {
   return undef unless defined $_[0];
   my ($deg, $min, $sec) = split ":", shift;
-  return (shift ~~ [qw/S W/] ? "-": "") . ($deg + ($min / 60) + ($sec / 3600));
+  return roundLatLong((shift ~~ [qw/S W/] ? "-": "") . ($deg + ($min / 60) + ($sec / 3600)));
 }
 
 sub formatIPhoneLatLong {
   return undef unless defined $_[0];
   my ($deg, $min, $sec, $direction) = shift =~ /^(\d+) deg (\d+)' ([\d.]+)" ([NWSE])$/;
-  return ($direction ~~ [qw/S W/] ? "-": "") . ($deg + ($min / 60) + ($sec / 3600));
+  return roundLatLong(($direction ~~ [qw/S W/] ? "-": "") . ($deg + ($min / 60) + ($sec / 3600)));
 }
 
 # memoize and rate limit
 use constant LIMIT => 5; # delay between requests
 my $last;
 sub place {
-  my ($lat, $long) = @{$_[0]}{qw/latitude longitude/};
+  my ($lat, $long) = @_;
   return undef unless defined $lat && defined $long;
+
+  say "Looking up place ($lat, $long)";
+  state $places = {};
+  if (my $place = $places->{$lat}{$long}) {
+    say "Found $place (in cache)";
+    return $place;
+  }
 
   my $sleep = $last ? LIMIT - time + $last : 0;
   if ($sleep > 0) {
-    say "Waiting $sleep seconds";
+    say "Waiting $sleep seconds to hit Geo API";
     sleep $sleep;
   }
   $last = time;
-
-  say "Looking up place";
+  
   my $res = decode_json $furl->get("https://maps.googleapis.com/maps/api/geocode/json?latlng=$lat,$long&sensor=true")->content;
   return undef if $res->{status} eq "ZERO_RESULTS";
   confess "Result not OK: " . Dumper $res unless $res->{status} eq "OK"; 
@@ -103,8 +115,10 @@ sub place {
 
   my $neighborhood = first { $_->{types}[0] eq "neighborhood" } @$match;
   my $locality     = first { $_->{types}[0] eq "locality"     } @$match;
-  confess "Failed to gey locality: " . Dumper $match unless $locality;
-  return $neighborhood ? "$neighborhood->{long_name} ($locality->{long_name})" : $locality->{long_name};
+  confess "Failed to get locality: " . Dumper $match unless $locality;
+  my $place = $places->{$lat}{$long} = $neighborhood ? "$neighborhood->{long_name} ($locality->{long_name})" : $locality->{long_name};
+  say "Found $place";
+  return $place;
 }
 
 sub sonyInfo {
@@ -186,7 +200,7 @@ sub extractInfo {
   my $sha        = sha256_hex($file);
   my $info       = { %{ImageInfo($file)}, PreviewImage => undef };
   my $cameraInfo = cameraInfo($info);
-  my $place      = place($cameraInfo);
+  my $place      = place($cameraInfo->{latitude}, $cameraInfo->{longitude});
 
   # check if file exists before we hit google API
   return if targetExists($target, $file, $cameraInfo->{date}, $sha);
