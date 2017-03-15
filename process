@@ -62,11 +62,6 @@ sub extractRecords {
   return { map { $_->{Name} => $_->{Value} } values %$records };
 }
 
-sub extractTitle {
-  my ($title) = shift =~ m|^(?:.*/)?(.*)(?:\..+?)$|;
-  return $title;
-}
-
 # Rund to ~100m (at the equator)
 sub roundLatLong {
   my $value = shift;
@@ -166,12 +161,6 @@ sub prettyDate {
   return Time::Piece->strptime($date, "%Y-%m-%dT%H:%M")->strftime("%A, %B %e, %Y, %I:%M %p");
 }
 
-sub description {
-  my ($sha, $place, $info) = @_;
-  my $description = join " ", map { "$_." } grep { defined } prettyDate($info->{date}), $place, @{$info}{qw/place camera lens/};
-  return $description . "\n\n$sha";
-}
-
 sub cameraInfo {
   my $info = shift;
   return sonyInfo($info)   if ($info->{DeviceModelName} // "") eq "ILCE-6500";
@@ -207,10 +196,8 @@ sub extractInfo {
   my $place = place($cameraInfo->{latitude}, $cameraInfo->{longitude});
   return {
     %$cameraInfo,
-    title       => extractTitle($file),
-    sha         => $sha,
-    place       => $place,
-    description => description($sha, $place, $cameraInfo),
+    sha   => $sha,
+    place => $place,
   }
 }
 
