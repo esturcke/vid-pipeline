@@ -7,7 +7,6 @@ use v5.22.0;
 no warnings 'experimental::smartmatch';
 
 use Image::ExifTool qw/:Public/;
-use File::Temp qw/tempdir/;
 use File::Find::Rule;
 use File::Path qw/make_path/;
 use File::Copy qw/cp/;
@@ -80,6 +79,7 @@ sub formatIPhoneLatLong {
   return ($direction ~~ [qw/S W/] ? "-": "") . ($deg + ($min / 60) + ($sec / 3600));
 }
 
+# memoize and rate limit
 sub place {
   my ($lat, $long) = @{$_[0]}{qw/latitude longitude/};
   return undef unless defined $lat && defined $long;
@@ -106,11 +106,6 @@ sub sonyInfo {
     date      => formatDate($info->{CreationDateValue}),
     latitude  => formatSonyLatLong($records->{Latitude},  $records->{LatitudeRef}),
     longitude => formatSonyLatLong($records->{Longitude}, $records->{LongitudeRef}),
-    filters   => ($records->{SpeedRef} ? [
-      "eq=contrast=1.8:saturation=2.8:brightness=0.2",
-      "curves=r='0/0 0.52/0.58 1/1':m='0/0.05 0.2/0.27 0.5/0.6 0.7/0.8 1/1'",
-      "unsharp",
-    ] : undef),
   }
 }
 
@@ -120,11 +115,6 @@ sub canonInfo {
     camera  => "Canon 60D",
     lens    => $info->{LensID},
     date    => formatDate($info->{MediaCreateDate}),
-    filters => [
-      "eq=contrast=1.8:saturation=2.8:brightness=0.2",
-      "curves=r='0/0 0.52/0.58 1/1':m='0/0.05 0.2/0.27 0.5/0.6 0.7/0.8 1/1'",
-      "unsharp",
-    ]
   }
 }
 
@@ -201,64 +191,6 @@ sub extractInfo {
   }
 }
 
-sub randomString {
-  my @chars = ("A".."Z", "a".."z", "0".."9");
-  return join "", @chars[map { rand @chars } 1..10];
-}
-
-sub filename {
-  return shift . "/" . randomString() . ".mp4";
-}
-
-sub grade {
-  my ($file, $dir, $info) = @_;
-  return $file unless $info->{filters};
-  my $out = filename($dir);
-  system(
-    "ffmpeg",
-    -threads => 0,
-    -i       => $file,
-    -vf      => join(",", @{$info->{filters}}),
-    -pix_fmt => "yuv420p",
-    -crf     => 18,
-    "-c:v"   => "libx264",
-    $out
-  );
-  return $out;
-}
-
-use constant DELAY => 60 * 10;
-my $last;
-sub upload {
-  my ($file, $info, $destination) = @_;
-  my $wait = $last ? DELAY - (time - $last) : 0;
-  if ($wait > 0) {
-    say "Waiting for $wait seconds";
-    sleep $wait;
-  }
-  $last = time;
-
-  my $status = system(
-    "youtube-upload",
-    "--title"                  => $info->{title},
-    "--description"            => $info->{description},
-    "--category"               => "People & Blogs",
-    "--tags"                   => "family, home-movies",
-    "--recording-date"         => $info->{date},
-    "--playlist"               => "Home movies",
-    "--default-language"       => "en",
-    "--default-audio-language" => "en",
-    "--privacy"                => "private",
-    ($info->{latitude} && $info->{longitude} ? ("--location" => "latitude=$info->{latitude},longitude=$info->{longitude}") : ()),
-    $file,
-  );
-  
-  unless ($status == 0) {
-    say "Removing $destination";
-    die "Upload failed: $?";
-  }
-}
-
 sub findDirectory {
   my ($target, $year, $day) = @_;
   return unless -d "$target/$year";
@@ -299,13 +231,8 @@ sub processFile {
   my $file   = shift;
   my $target = shift;
   my $info   = extractInfo($file, $target) || return;
-  my $dir    = tempdir();
   say "Processing $file";
-  say Dumper $info;
 
   # copy file to target
-  my $destination = copy($file, $target, $info) || return;
-
-  # upload
-  upload(grade($file, $dir, $info), $info, $destination);
+  copy($file, $target, $info);
 }
