@@ -80,9 +80,18 @@ sub formatIPhoneLatLong {
 }
 
 # memoize and rate limit
+use constant LIMIT => 5; # delay between requests
+my $last;
 sub place {
   my ($lat, $long) = @{$_[0]}{qw/latitude longitude/};
   return undef unless defined $lat && defined $long;
+
+  my $sleep = $last ? LIMIT - time + $last : 0;
+  if ($sleep > 0) {
+    say "Waiting $sleep seconds";
+    sleep $sleep;
+  }
+  $last = time;
 
   say "Looking up place";
   my $res = decode_json $furl->get("https://maps.googleapis.com/maps/api/geocode/json?latlng=$lat,$long&sensor=true")->content;
