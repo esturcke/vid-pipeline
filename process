@@ -120,7 +120,6 @@ sub sonyInfo {
   my $info    = shift;
   my $records = extractRecords($info);
   return {
-    camera    => "Sony α6500",
     date      => formatDate($info->{CreationDateValue}),
     latitude  => formatSonyLatLong($records->{Latitude},  $records->{LatitudeRef}),
     longitude => formatSonyLatLong($records->{Longitude}, $records->{LongitudeRef}),
@@ -130,16 +129,13 @@ sub sonyInfo {
 sub canonInfo {
   my $info = shift;
   return {
-    camera  => "Canon 60D",
-    lens    => $info->{LensID},
-    date    => formatDate($info->{MediaCreateDate}),
+    date => formatDate($info->{MediaCreateDate}),
   }
 }
 
 sub iPhoneInfo {
   my $info = shift;
   return {
-    camera    => $info->{Model},
     date      => formatDate($info->{CreationDate}),
     latitude  => formatIPhoneLatLong($info->{GPSLatitude}),
     longitude => formatIPhoneLatLong($info->{GPSLongitude}),
@@ -149,7 +145,6 @@ sub iPhoneInfo {
 sub generalInfo {
   my $info = shift;
   return {
-    camera    => $info->{Model},
     date      => formatDate($info->{CreationDate} // $info->{CreateDate} // confess "Could not find date: " . Dumper $info),
     latitude  => formatIPhoneLatLong($info->{GPSLatitude}),
     longitude => formatIPhoneLatLong($info->{GPSLongitude}),
