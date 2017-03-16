@@ -18,6 +18,10 @@ use Digest::SHA qw/sha256_hex/;
 use Time::Piece;
 use Data::Dumper;
 
+%Image::ExifTool::UserDefined::Options = (
+  LargeFileSupport => 1,
+);
+
 use constant MONTH => [
   qw/_ Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec/
 ];
