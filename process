@@ -148,7 +148,7 @@ sub iPhoneInfo {
 sub generalInfo {
   my $info = shift;
   return {
-    date      => formatDate($info->{CreationDate} // $info->{CreateDate} // confess "Could not find date: " . Dumper $info),
+    date      => formatDate($info->{CreationDate} // $info->{CreateDate} // $info->{DateTimeOriginal} // confess "Could not find date: " . Dumper $info),
     latitude  => formatIPhoneLatLong($info->{GPSLatitude}),
     longitude => formatIPhoneLatLong($info->{GPSLongitude}),
   }
