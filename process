@@ -108,8 +108,11 @@ sub place {
   my $match = $res->{results}[0]{address_components};
   confess "Failed to get match: " . Dumper $res unless $match;
 
-  my $neighborhood = first { $_->{types}[0] eq "neighborhood" } @$match;
-  my $locality     = first { $_->{types}[0] eq "locality"     } @$match;
+  my $neighborhood = first { $_->{types}[0] eq "neighborhood"                 } @$match;
+  my $locality     = first { $_->{types}[0] eq "locality"                     } @$match;
+  my $sublocality  = first { $_->{types}[1] eq "sublocality"                  } @$match;
+  my $area2        = first { $_->{types}[0] eq "administrative_area_level_2"  } @$match;
+  $locality ||= $sublocality || $area2;
   confess "Failed to get locality: " . Dumper $match unless $locality;
   my $place = $places->{$lat}{$long} = $neighborhood ? "$neighborhood->{long_name} ($locality->{long_name})" : $locality->{long_name};
   say "Found $place";
@@ -216,7 +219,7 @@ sub copy {
     $directory = $info->{place} ? "$target/$year/$day $info->{place}" : "$target/$year/$day";
     make_path $directory;
   }
-  elsif ($directory !~ /$info->{place}/) {
+  elsif ($info->{place} && $directory !~ /\Q$info->{place}\E/) {
     my $new = $directory =~ m|/\d{2}-\d{2}$| ?  "$directory $info->{place}" : "$directory, $info->{place}";
     rename $directory, $new;
     $directory = $new;
