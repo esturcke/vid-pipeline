@@ -4,4 +4,4 @@ A quick script to copy videos into folders organized by date and place of the fo
 
 `[year]/[month]-[day] [place], [place]...`
 
-It was inspired by [Elodie](https://github.com/jmathai/elodie), but not neirly as capable.
+After this it’s ready to be synced with something like Google Photos. The script was inspired by [Elodie](https://github.com/jmathai/elodie), but not nearly as capable.
